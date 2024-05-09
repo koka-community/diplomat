@@ -1,0 +1,5 @@
+extern {{ m.c_method_name }}({%- for (param, name) in m.param_types_ffi_cast.iter().zip(m.param_names_ffi.iter()) %}
+        {%- if !loop.first %}, {% endif -%}
+        {{ param }} {{ name }}
+      {%- endfor -%}) : io {{ m.return_type_ffi_cast }}
+  c "{{ m.c_method_name }}"

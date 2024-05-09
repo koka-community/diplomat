@@ -18,6 +18,8 @@ pub mod dotnet;
 #[doc(hidden)]
 pub mod js;
 #[doc(hidden)]
+pub mod koka;
+#[doc(hidden)]
 pub mod kotlin;
 
 mod docs_util;
@@ -196,6 +198,39 @@ pub fn gen(
                     errors_found = true;
                 }
             }
+        }
+        "koka" => {
+            let mut attr_validator = hir::BasicAttributeValidator::new(target_language);
+            attr_validator.support.renaming = true;
+            attr_validator.support.disabling = true;
+            attr_validator.support.constructors = true;
+            attr_validator.support.named_constructors = true;
+            attr_validator.support.fallible_constructors = true;
+            attr_validator.support.accessors = true;
+            attr_validator.support.stringifiers = true;
+            attr_validator.support.comparators = true;
+            attr_validator.support.iterators = true;
+            attr_validator.support.iterables = true;
+            attr_validator.support.indexing = true;
+            let tcx = match hir::TypeContext::from_ast(&env, attr_validator) {
+                Ok(context) => context,
+                Err(e) => {
+                    for (ctx, err) in e {
+                        eprintln!("Lowering error in {ctx}: {err}");
+                    }
+                    std::process::exit(1);
+                }
+            };
+            match koka::run(&tcx, docs_url_gen, strip_prefix) {
+                Ok(mut files) => out_texts = files.take_files(),
+                Err(errors) => {
+                    eprintln!("Found errors whilst generating {target_language}:");
+                    for error in errors {
+                        eprintln!("\t{}: {}", error.0, error.1);
+                    }
+                    errors_found = true;
+                }
+            };
         }
         o => panic!("Unknown target: {}", o),
     }

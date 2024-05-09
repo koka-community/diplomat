@@ -1,0 +1,123 @@
+
+
+pub alias {{type_name}}-c = c-pointer<{{type_name}}>;
+pub alias {{type_name}}-co = owned-c<{{type_name}}>;
+pub alias {{type_name}}-cb<s::S> = borrowed-c<s,{{type_name}}>;
+  {%- for field in fields %}
+  {%- match field.annotation %}
+  {%- when Some with (annotation) %}
+  // @{{annotation}}()
+  {%- when None %}
+  {%- endmatch %}
+pub extern external/{{field.name}}(c: c-pointer<{{type_name}}>): io-noexn {{field.ffi_cast_type_name}}
+  c inline "(({{type_name}})#1)->{{field.name}}";
+  {%- endfor %}
+
+pub type {{type_name}}
+{% if !docs.is_empty() -%}
+/// {{docs}}
+{% endif -%}
+   {%- if let Some(it) = special.iterable %} with core.Iterable<{{it}}> {%- endif %}
+   {%- if special.comparator -%} implements core.Comparable<{{type_name}}> {%- endif %}
+
+  {%- for field in fields %}
+  {% if !mutable -%} final {% endif -%} {{field.dart_type_name}} {{field.name}};
+  {%- endfor %}
+
+  {%- match default_constructor %}
+  {%- when Some with (c) %}
+
+  {{c}}
+  {%- when None %}
+  {%- endmatch %}
+
+  {% if lifetimes.all_lifetimes().len() == 0 -%}
+  // This struct contains borrowed fields, so this takes in a list of
+  // "edges" corresponding to where each lifetime's data may have been borrowed from
+  // and passes it down to individual fields containing the borrow.
+  // This method does not attempt to handle any dependencies between lifetimes, the caller
+  // should handle this when constructing edge arrays.
+  {% endif -%}
+  // ignore: unused_element
+  {{type_name}}._fromFfi(_{{type_name}}Ffi ffi {%- for lifetime in lifetimes.all_lifetimes() -%} , core.List<Object> {{lifetimes.fmt_lifetime(lifetime)}}Edges {%- endfor -%}) :
+    {%- for field in fields %}
+    {{field.name}} = {{field.c_to_dart}}
+    {%- if loop.last %};{% else %},{% endif -%}
+    {%- endfor %}
+
+  {% if lifetimes.all_lifetimes().len() != 0 -%}
+  // If this struct contains any slices, their lifetime-edge-relevant objects (typically _FinalizedArenas) will only
+  // be constructed here, and can be appended to any relevant lifetime arrays here. <lifetime>AppendArray accepts a list
+  // of arrays for each lifetime to do so. It accepts multiple lists per lifetime in case the caller needs to tie a lifetime to multiple
+  // output arrays. Null is equivalent to an empty list: this lifetime is not being borrowed from.
+  {%- if lifetimes.all_lifetimes().len() > 1 %}
+  //
+  // This method does not handle lifetime relationships: if `'foo: 'bar`, make sure fooAppendArray contains everything barAppendArray does.
+  {%- endif%}
+  {% endif -%}
+  // ignore: unused_element
+  _{{type_name}}Ffi _toFfi(ffi.Allocator temp
+    {%- if lifetimes.all_lifetimes().len() != 0 -%}
+    , {
+    {%- for l in lifetimes.all_lifetimes() %}{% if !loop.first %}, {% endif %}core.List<core.List<Object>> {{lifetimes.fmt_lifetime(l)}}AppendArray = const []
+    {%- endfor -%}
+    }
+    {%- endif -%}
+  ) {
+    final struct = ffi.Struct.create<_{{type_name}}Ffi>();
+    {%- for field in fields %}
+    {%- for statement in field.dart_to_c %}
+    {{statement}}
+    {%- endfor %}
+    {%- endfor %}
+    return struct;
+  }
+
+  {%- for m in methods %}
+{% include "method.kk.jinja" %}
+  {%- endfor %}
+
+  @override
+  bool operator ==(Object other) =>
+      other is {{type_name}}
+      {%- for field in fields %} &&
+      other.{{field.name}} == {% if field.name == "other" %}this.{% endif %}{{field.name}}
+      {%- endfor %};
+
+  @override
+  int get hashCode => Object.hashAll([
+      {%- for field in fields %}
+        {{field.name}},
+      {%- endfor %}
+      ]);
+
+
+  {%- for l in lifetimes.all_lifetimes() %}
+    {%- let ltname = lifetimes.fmt_lifetime(l) %}
+
+  // Return all fields corresponding to lifetime `'{{ltname}}` 
+  // without handling lifetime dependencies (this is the job of the caller)
+  // This is all fields that may be borrowed from if borrowing `'{{ltname}}`,
+  // assuming that there are no `'other: {{ltname}}`. bounds. In case of such bounds,
+  // the caller should take care to also call _fieldsForLifetimeOther
+  // ignore: unused_element
+  core.List<Object> get _fieldsForLifetime{{ltname.to_uppercase()}} => [
+    {%- for field in self::iter_fields_with_lifetimes_from_set(fields, l) %}
+        {%- if !loop.first %}, {% endif -%}
+        {%- if let Some(st) = field.maybe_struct_borrow_info -%}
+          {%- for def_lt in self::iter_def_lifetimes_matching_use_lt(l, st) -%}
+          {%- if !loop.first %}, {% endif -%}
+          ...{{field.name}}._fieldsForLifetime{{st.env.fmt_lifetime(def_lt).to_uppercase()}}
+          {%- endfor -%}
+        {%- else -%}
+          {{field.name}}
+        {%- endif -%}
+    {%- endfor -%}
+    ];
+
+  {%- endfor %}
+
+{%- for m in methods %}
+
+{% include "native_method.kk.jinja" %}
+{%- endfor %}

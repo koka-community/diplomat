@@ -1,0 +1,24 @@
+{% if !decls.is_empty() -%}
+pub type {{name}}-union-t
+alias {{name}}-union-c = c-pointer<{{name}}-union-t>;
+alias {{name}}-union-co = owned-c<{{name}}-union-t>;
+alias {{name}}-union-cb = borrowed-c<{{name}}-union-t>;
+  {% for decl in decls -%}
+  {% if !loop.first %}
+
+  {% endif -%}
+  {{decl.replace('\n', "\n  ")}}
+  {%- endfor %}
+
+{% endif -%}
+
+pub type {{name}}-struct-t
+alias {{name}}-struct-c = c-pointer<{{name}}-struct-t>;
+alias {{name}}-struct-co = owned-c<{{name}}-struct-t>;
+alias {{name}}-struct-cb = borrowed-c<{{name}}-struct-t>;
+  {% if !decls.is_empty() -%}
+pub extern {{name}}/union(c: c-pointer<{{name}}-struct-t>): io-noexn c-pointer<{{name}}-union-t>
+  c inline "(intptr_t)((({{name}})#1)->union)"
+  {%- endif %}
+pub extern {{name}}/is-ok(c: c-pointer<{{name}}-struct-t>): io-noexn bool
+  c inline "(({{name}})#1)->isOk"
